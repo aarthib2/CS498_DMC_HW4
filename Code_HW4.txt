@@ -21,7 +21,7 @@ python3.9 --version
 
 source venv/bin/activate
 
-***Uploaded searchlog.csv to spark_project folder where python file is also located
+**Uploaded searchlog.csv to spark_project folder where python file is also located
 
 
 ********************************QUERY FILE********************************
@@ -32,23 +32,12 @@ import glob
 import json
 import os
 from collections import OrderedDict, defaultdict
+import tldextract
+
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
-
-# Domain priority: .org > .edu > .com
-def Sdomain_priority(url):
-    if url.endswith('.org'):
-        return 0
-    elif url.endswith('.edu'):
-        return 1
-    elif url.endswith('.com'):
-        return 2
-    else:
-        return 3
-
-import tldextract
 
 def domain_priority(url):
     ext = tldextract.extract(url)
@@ -62,7 +51,8 @@ def domain_priority(url):
     else:
         return 3
 
-# Load all processed_data/*.json files into a list of records
+
+# Load all json files into a list of records
 def load_data():
     data = []
     for filename in glob.glob('processed_data/part-*.json'):
@@ -71,16 +61,16 @@ def load_data():
                 data.append(json.loads(line))
     return data
 
-# Optionally, cache the data for efficiency
+
+# Cache the data for efficiency
 DATA = load_data()
+
 
 @app.route('/results', methods=['POST'])
 def results():
     req = request.get_json()
     term = req.get('term')
-    if not term:
-        return jsonify({"error": "Missing 'term' in request"}), 400
-
+    
     # Aggregate clicks per URL for the search term
     url_clicks = {}
     for record in DATA:
@@ -89,17 +79,14 @@ def results():
             clicks = int(record['clicks'])
             url_clicks[url] = url_clicks.get(url, 0) + clicks
 
-    # Sort: first by clicks desc, then by domain priority
     sorted_items = sorted(
         url_clicks.items(),
         key=lambda x: (-x[1], domain_priority(x[0]))
     )
 
-    # Build output dictionary
     results = {url: clicks for url, clicks in sorted_items}
     results_final = OrderedDict(sorted_items)
    
-    #return jsonify({"results": results_final})
     return app.response_class(
         response=json.dumps({"results": results_final}),
         status=200,
@@ -111,22 +98,23 @@ def results():
 def trends():
     req = request.get_json()
     term = req.get('term')
-    if not term:
-        return jsonify({"error": "Missing 'term' in request"}), 400
 
-    total_clicks = sum(int(record['clicks']) for record in DATA if record['term'] == term)
-
+    total_clicks = 0
+    for record in DATA:
+        if record['term'] == term:
+            total_clicks += int(record['clicks'])
     return jsonify({"clicks": total_clicks})
+
 
 @app.route('/popularity', methods=['POST'])
 def popularity():
     req = request.get_json()
     url = req.get('url')
-    if not url:
-        return jsonify({"error": "Missing 'url' in request"}), 400
 
-    total_clicks = sum(int(record['clicks']) for record in DATA if record['url'] == url)
-
+    total_clicks = 0
+    for record in DATA:
+        if record['url'] == url:
+            total_clicks += int(record['clicks'])
     return jsonify({"clicks": total_clicks})
 
 
@@ -134,10 +122,8 @@ def popularity():
 def get_best_terms():
     req = request.get_json()
     website = req.get('website')
-    if not website:
-        return jsonify({"error": "Missing 'website' in request"}), 400
-
-    # Step 1: Aggregate clicks per term for the given website
+    
+    # Aggregate clicks per term for the given website
     term_clicks = defaultdict(int)
     total_clicks = 0
 
@@ -150,9 +136,11 @@ def get_best_terms():
     if total_clicks == 0:
         return jsonify({"best_terms": []})
 
-    # Step 2: Return terms with > 5% of total clicks
-    best_terms = [term for term, clicks in term_clicks.items() if clicks / total_clicks > 0.05]
-
+    best_terms = []
+    for term, clicks in term_clicks.items():
+        proportion = clicks / total_clicks
+        if proportion > 0.05:
+            best_terms.append(term)
     return jsonify({"best_terms": best_terms})
 
 
