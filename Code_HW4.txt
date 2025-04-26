@@ -23,7 +23,60 @@ source venv/bin/activate
 
 **Uploaded searchlog.csv to spark_project folder where python file is also located
 
+
+
 ********************************Pre-Process FILE********************************
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+import re
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("SearchLogParser").getOrCreate()
+
+# Read the log file as a text file
+lines = spark.read.text("searchLog.csv").rdd.map(lambda r: r[0])
+
+def parse_line(line):
+    m = re.match(r"searchTerm:\s*[‘']?(.*?)[’']?,\s*(.*)", line)
+    if not m:
+        return []
+    term = m.group(1).strip()
+    rest = m.group(2).strip()
+    # split by '~' to get url:click pairs
+    url_clicks = rest.split("~")
+    records = []
+    for uc in url_clicks:
+        # Remove any trailing '>' or whitespace
+        uc = uc.strip().rstrip('>')
+        if ':' not in uc:
+            continue
+        url, clicks = uc.split(":", 1)
+        url = url.strip()
+        try:
+            clicks = int(re.match(r"\d+", clicks.strip()).group())
+        except Exception:
+            continue
+        records.append( (term, url, clicks) )
+    return records
+
+# FlatMap to get all (term, url, clicks) tuples
+parsed_records = lines.flatMap(parse_line).collect()
+
+schema = StructType([
+    StructField("term", StringType(), True),
+    StructField("url", StringType(), True),
+    StructField("clicks", IntegerType(), True)
+])
+
+# Create DataFrame from list of tuples
+df = spark.createDataFrame(parsed_records, schema)
+
+# Write as JSON, one record per file (coalesce to 1 per file)
+df.repartition(df.count()).write.mode("overwrite").json("processed_data")
+
+spark.stop()
+
 
 
 ********************************QUERY FILE********************************
